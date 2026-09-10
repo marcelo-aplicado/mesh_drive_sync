@@ -1,241 +1,365 @@
 # Mesh Drive Sync
 
-O **Mesh Drive Sync** é um aplicativo para Windows que centraliza o mapeamento persistente e a sincronização de compartilhamentos WebDAV disponibilizados pelo plugin Mesh Drive para MeshCentral.
+Cliente de sincronização bidirecional para compartilhamentos WebDAV do MeshCentral no Windows.
 
-A versão **3.0.8** permite administrar diversos mapeamentos, domínios e credenciais em uma única aplicação, com apenas um processo e um ícone na bandeja do sistema.
+O **Mesh Drive Sync** sincroniza arquivos e pastas entre o Mesh Drive e uma pasta local, oferecendo uma experiência semelhante a OneDrive, Google Drive e Dropbox, mas utilizando a infraestrutura WebDAV do MeshCentral.
 
-## Recursos da versão 3.0.8
+## Principais recursos
 
-### Múltiplos mapeamentos
+### Sincronização bidirecional
 
-- Cadastro de vários perfis no mesmo aplicativo.
-- Suporte a diferentes domínios MeshCentral.
-- Credenciais independentes por domínio e usuário.
-- Seleção da pasta remota sem necessidade de conhecer manualmente o caminho `/drive`.
-- Listagem das pastas disponíveis no Mesh Drive.
-- Seleção apenas entre letras de unidade disponíveis.
-- Nome do perfil utilizado como identificação do mapeamento no Windows.
+- Upload automático de arquivos criados ou modificados localmente.
+- Download automático de arquivos criados ou modificados no WebDAV.
+- Sincronização acionada por eventos do sistema de arquivos.
+- Debounce configurável para aguardar a estabilização antes do envio.
+- Verificação periódica de segurança para alterações remotas e eventos locais eventualmente perdidos.
+- Sincronização manual pela interface ou pelo ícone da bandeja.
+- Botão para parar e reiniciar o serviço de sincronização sem fechar o aplicativo.
 
-### Mapeamento persistente
+### Arquivos e diretórios
 
-O aplicativo monitora os perfis configurados e tenta restabelecer os mapeamentos WebDAV quando necessário, evitando depender somente da persistência nativa do Windows.
+- Sincronização recursiva de arquivos e subpastas.
+- Suporte a arquivos armazenados diretamente na raiz do compartilhamento.
+- Criação automática de pastas remotas por WebDAV `MKCOL`.
+- Criação local de pastas existentes no servidor.
+- Suporte a pastas vazias.
+- Opção para sincronizar todo o compartilhamento ou somente as pastas selecionadas.
 
-Cada perfil pode ser configurado para:
+### Proteção contra conflitos
 
-- iniciar automaticamente com o Windows;
-- reconectar quando a unidade ficar indisponível;
-- usar uma letra de unidade específica;
-- apontar para a raiz do Mesh Drive ou para uma pasta remota específica.
+O cliente utiliza:
 
-### Inicialização automática
+- hash SHA-256 para identificar alterações locais;
+- ETag WebDAV para identificar alterações remotas;
+- cópia local de segurança quando o mesmo arquivo for modificado dos dois lados.
 
-A versão 3.0.8 mantém apenas uma entrada de inicialização no Registro do Windows:
+Exemplo de arquivo preservado em conflito:
 
 ```text
-HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
+Relatorio.docx.conflito-20260909-143210
 ```
 
-A entrada `MeshDriveSync` é criada somente quando existe pelo menos um perfil ativo marcado com a opção **Iniciar este mapeamento automaticamente com o Windows**.
+### Lixeira remota
 
-Quando nenhum perfil utiliza inicialização automática, a entrada é removida. Entradas antigas no formato `MeshDriveSync-*`, usadas por versões anteriores, também são eliminadas automaticamente.
+Arquivos e pastas removidos localmente não são excluídos definitivamente do servidor. O conteúdo é movido para a pasta `.Trash`, preservando a estrutura original.
 
-### Controle por permissão
-
-O aplicativo verifica o tipo de acesso disponível para cada perfil:
-
-- **Leitura e gravação:** permite mapeamento e sincronização.
-- **Somente leitura:** permite somente o mapeamento.
-- **Sem acesso:** impede o uso do perfil.
-- **Não verificada:** a permissão será validada ao conectar.
-
-Quando o compartilhamento é somente leitura, a sincronização não é oferecida. Isso evita tentativas de upload, alteração ou exclusão em pastas nas quais o usuário possui apenas permissão de consulta.
-
-### Sincronização
-
-Para perfis com permissão de leitura e gravação, o Mesh Drive Sync pode manter uma cópia local do compartilhamento.
-
-Principais recursos:
-
-- sincronização bidirecional;
-- criação e atualização de arquivos;
-- criação de pastas;
-- monitoramento de alterações locais;
-- verificação periódica de alterações remotas;
-- tratamento de conflitos;
-- uso de hash SHA-256 e ETag;
-- movimentação de exclusões para a pasta remota `.Trash`;
-- proteção contra arquivos temporários e arquivos internos do sincronizador.
-
-### Organização da pasta local
-
-A pasta local segue o padrão:
+Exemplo:
 
 ```text
-<Pasta selecionada>\Mesh Drive\<Domínio>\<Perfil>
+Documentos\Projetos\Relatorio.docx
+```
+
+é movido para:
+
+```text
+.Trash\Documentos\Projetos\Relatorio.docx
+```
+
+Se já existir outro item com o mesmo nome na lixeira, a versão anterior é renomeada:
+
+```text
+Relatorio (1).docx
+Relatorio (2).docx
+Relatorio (3).docx
+```
+
+O item excluído mais recentemente mantém o nome original.
+
+### Múltiplos domínios e perfis
+
+É possível cadastrar e executar mais de um domínio Mesh simultaneamente, por exemplo:
+
+```text
+mesh.aplicado.com.br
+mesh.crsbrands.com.br
+```
+
+Ao cadastrar o domínio:
+
+```text
+mesh.aplicado.com.br
+```
+
+o aplicativo configura automaticamente o endereço WebDAV:
+
+```text
+https://mesh.aplicado.com.br/drive/
+```
+
+Cada domínio possui separadamente:
+
+- configuração;
+- credencial;
+- pasta local;
+- estado da sincronização;
+- arquivo de log;
+- inicialização automática;
+- instância de execução.
+
+A pasta local padrão segue o formato:
+
+```text
+%USERPROFILE%\Mesh Drive\<domínio>
 ```
 
 Exemplo:
 
 ```text
-C:\Users\usuario\Mesh Drive\mesh.crsbrands.com.br\KeePassXC
+C:\Users\usuario\Mesh Drive\mesh.aplicado.com.br
 ```
-
-A pré-visualização do caminho é atualizada automaticamente quando o domínio ou o nome do perfil é alterado.
 
 ### Credenciais
 
-As senhas são armazenadas no **Gerenciador de Credenciais do Windows**.
+A senha é armazenada no Gerenciador de Credenciais do Windows, em vez de ser gravada diretamente no arquivo JSON de configuração.
 
-O arquivo de configuração mantém apenas informações não sensíveis, como domínio, usuário, letra da unidade e preferências do perfil.
+### Inicialização automática
 
-A configuração principal é armazenada em:
-
-```text
-%LOCALAPPDATA%\MeshDriveSync\config.json
-```
-
-Os estados e logs de cada perfil ficam em:
+A opção **Iniciar com o Windows** registra o perfil atual em:
 
 ```text
-%LOCALAPPDATA%\MeshDriveSync\profiles\<ID do perfil>
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
 ```
 
-## Interface
+Como o registro é feito em `HKEY_CURRENT_USER`, não são necessários privilégios administrativos.
 
-A aplicação utiliza uma única janela de gerenciamento e um único ícone na bandeja do sistema.
+Cada domínio recebe sua própria entrada e é iniciado em segundo plano com um comando semelhante a:
 
-Na tela principal é possível:
+```powershell
+MeshDriveSync.exe --profile="mesh.aplicado.com.br" --background
+```
 
-- adicionar, editar e remover perfis;
-- conectar e desconectar mapeamentos;
-- verificar permissões;
-- abrir uma unidade no Explorador de Arquivos;
-- visualizar domínio, pasta remota, letra, permissão e estado.
+### Interface
 
-Na tela de cadastro é possível:
+- Tema escuro.
+- Dashboard com indicadores de uploads, downloads, conflitos e erros.
+- Histórico de atividade recente.
+- Tela de configuração por domínio.
+- Seletor de domínios.
+- Ícone na janela, barra de tarefas e bandeja do Windows.
+- Menu da bandeja com acesso à pasta local, sincronização manual, parada do serviço e abertura de outro domínio.
 
-- informar nome, domínio, usuário e senha;
-- listar as pastas remotas disponíveis;
-- selecionar uma letra livre;
-- escolher a pasta-base local;
-- habilitar inicialização automática;
-- habilitar reconexão automática;
-- habilitar sincronização quando houver permissão de gravação.
-
-## Requisitos
+## Requisitos para compilação
 
 ### Sistema operacional
 
-- Windows 10 ou Windows 11 de 64 bits.
-- Serviço **WebClient** disponível e em execução para o mapeamento WebDAV.
+Ambiente de compilação recomendado:
 
-### Compilação
+- Windows 10;
+- Windows 11;
+- Windows Server com suporte ao .NET 8 Desktop Runtime/SDK.
 
-- .NET SDK 8.
-- PowerShell.
-- ImageMagick opcional, utilizado para preparar o ícone.
-- Inno Setup 6 opcional, utilizado para gerar o instalador.
+### .NET SDK 8
+
+Instale o **.NET SDK 8.0**.
+
+Download oficial:
+
+- [.NET 8 Downloads](https://dotnet.microsoft.com/download/dotnet/8.0)
+
+Verifique a instalação:
+
+```powershell
+dotnet --version
+```
+
+O comando deve retornar uma versão `8.x` compatível.
+
+### PowerShell
+
+O projeto utiliza um script PowerShell para restaurar, compilar e publicar o aplicativo.
+
+Na sessão atual, libere a execução de scripts:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+```
+
+Essa alteração vale somente para a janela atual do PowerShell.
+
+### ImageMagick, opcional
+
+O ImageMagick é utilizado para converter `Aplicado_Favicon.svg` em um arquivo `.ico` multirresolução para o Windows.
+
+Instalação pelo WinGet:
+
+```powershell
+winget install -e --id ImageMagick.ImageMagick
+```
+
+Depois da instalação, feche e abra novamente o PowerShell e verifique:
+
+```powershell
+magick -version
+```
+
+Sem o ImageMagick, o projeto ainda pode ser compilado, mas a preparação automática do ícone pode não ser executada.
+
+### Inno Setup, opcional
+
+O Inno Setup 6 é necessário somente para gerar o instalador.
+
+Download oficial:
+
+- [Inno Setup](https://jrsoftware.org/isdl.php)
+
+O script de build procura o compilador em:
+
+```text
+C:\Program Files (x86)\Inno Setup 6\ISCC.exe
+```
 
 ## Como compilar
 
-Abra o PowerShell na raiz do projeto e execute:
+Abra o PowerShell na pasta raiz do projeto:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\build.ps1
 ```
 
-O script executa a restauração, a compilação e duas publicações para Windows x64.
-
-## Executáveis gerados
-
-### Versão portátil
+O script executa:
 
 ```text
-dist\MeshDriveSync_Portable.exe
+dotnet restore
+dotnet build
+dotnet publish
 ```
 
-- Inclui o runtime do .NET 8.
-- Não exige instalação adicional do .NET.
-- Indicada para uso portátil, testes e distribuição avulsa.
+## Arquivos gerados
 
-### Versão enxuta
+### Executável portátil
+
+O executável publicado é criado em:
 
 ```text
 dist\MeshDriveSync.exe
 ```
 
-- Exige o **Microsoft .NET 8 Desktop Runtime x64** instalado.
-- Possui tamanho reduzido.
-- É a edição utilizada pelo instalador.
-
-O trimming permanece desabilitado para preservar a compatibilidade com Windows Forms, interoperabilidade COM, Gerenciador de Credenciais e chamadas nativas do Windows.
-
-## Estrutura do projeto
+A publicação utiliza:
 
 ```text
-CredentialManager.cs
-MainForm.cs
-MeshDriveSync.csproj
-MeshDriveSync.iss
-Models.cs
-NetworkDriveManager.cs
-ProfileDialog.cs
-Program.cs
-SyncEngine.cs
-WebDavClient.cs
-build.ps1
-prepare-icon.ps1
+SelfContained = true
+PublishSingleFile = true
+RuntimeIdentifier = win-x64
 ```
 
-## Instalação e uso
-
-1. Compile o projeto ou utilize um dos executáveis publicados.
-2. Execute o Mesh Drive Sync.
-3. Selecione **Adicionar**.
-4. Informe um nome para o perfil.
-5. Informe o domínio do MeshCentral, o usuário e a senha.
-6. Use **Listar pastas** para selecionar a raiz ou uma pasta do Mesh Drive.
-7. Escolha uma letra de unidade disponível.
-8. Selecione a pasta-base local.
-9. Escolha se o perfil deve iniciar com o Windows e reconectar automaticamente.
-10. Salve o perfil e conecte o mapeamento.
-
-Após a conexão, o aplicativo verifica a permissão efetiva. A sincronização somente fica disponível para compartilhamentos com acesso de leitura e gravação.
-
-## Atualização a partir de versões anteriores
-
-A versão 3.0.8 utiliza uma configuração central e uma única instância do aplicativo. Antes de substituir uma instalação antiga, recomenda-se preservar os dados existentes em:
+Por isso, para uso normal, basta distribuir o arquivo:
 
 ```text
-%LOCALAPPDATA%\MeshDriveSync
+MeshDriveSync.exe
 ```
 
-A aplicação remove automaticamente entradas antigas de inicialização no formato:
+O usuário final não precisa instalar o .NET separadamente.
+
+### Instalador
+
+Quando o Inno Setup estiver instalado, o build também gera:
 
 ```text
-MeshDriveSync-*
+installer\MeshDriveSync-Setup-2.1.0.exe
 ```
+
+O instalador é opcional. O executável portátil pode ser copiado para uma pasta fixa e executado diretamente.
+
+Pasta sugerida para instalação manual:
+
+```text
+C:\Aplicativos\MeshDriveSync
+```
+
+Evite executar permanentemente a aplicação a partir de `Downloads`, `Temp` ou outra pasta que possa ser removida, pois a inicialização automática registra o caminho atual do executável.
+
+## Primeira configuração
+
+1. Execute `MeshDriveSync.exe`.
+2. Clique em **Novo domínio**.
+3. Informe somente o domínio, por exemplo:
+
+   ```text
+   mesh.aplicado.com.br
+   ```
+
+4. Abra o domínio criado.
+5. Informe o usuário e a senha.
+6. Clique em **Conectar e listar**.
+7. Selecione as pastas desejadas ou marque **Sincronizar tudo**.
+8. Revise a pasta local.
+9. Ajuste, se necessário:
+   - **Aguardar após alteração**, padrão de 10 segundos;
+   - **Verificação de segurança**, padrão de 600 segundos.
+10. Marque **Iniciar com o Windows**, se desejado.
+11. Clique em **Salvar e iniciar**.
+
+## Execução de múltiplos domínios
+
+Abra novamente o mesmo executável e selecione outro domínio.
+
+Também é possível iniciar diretamente um perfil:
+
+```powershell
+.\MeshDriveSync.exe --profile="mesh.aplicado.com.br"
+```
+
+Para iniciar em segundo plano:
+
+```powershell
+.\MeshDriveSync.exe --profile="mesh.aplicado.com.br" --background
+```
+
+Uma instância é permitida para cada domínio.
+
+## Arquivos de configuração e logs
+
+As informações de cada domínio são armazenadas em:
+
+```text
+%LOCALAPPDATA%\MeshDriveSync\profiles
+```
+
+Estrutura aproximada:
+
+```text
+profiles\
+├── mesh.aplicado.com.br.settings.json
+├── mesh.aplicado.com.br.state.json
+├── mesh.aplicado.com.br.log
+├── mesh.crsbrands.com.br.settings.json
+├── mesh.crsbrands.com.br.state.json
+└── mesh.crsbrands.com.br.log
+```
+
+## Distribuição
+
+Para distribuição simples:
+
+1. Compile o projeto.
+2. Copie `dist\MeshDriveSync.exe` para uma pasta fixa da estação.
+3. Execute o aplicativo.
+4. Configure os domínios.
+5. Marque **Iniciar com o Windows**, se necessário.
+
+O instalador é útil quando for necessário:
+
+- padronizar o diretório de instalação;
+- criar atalhos;
+- disponibilizar desinstalação;
+- facilitar a distribuição para diversos usuários.
 
 ## Recomendações de teste
 
-Antes de utilizar em produção, valide:
+Antes de utilizar em dados de produção, valide com uma pasta de teste:
 
-- criação de múltiplos perfis;
-- mapeamentos em domínios diferentes;
-- reconexão após novo logon;
-- remoção da inicialização ao desmarcar ou excluir todos os perfis automáticos;
-- acesso a compartilhamentos somente leitura;
-- bloqueio da sincronização em modo somente leitura;
-- upload e download em compartilhamentos graváveis;
-- criação e alteração de arquivos pelo Explorador de Arquivos;
-- conflitos de edição;
-- funcionamento das versões portátil e enxuta.
-
-## Versão estável
-
-A versão **3.0.8** é a base estável oficial para as próximas melhorias do Mesh Drive Sync.
+- criação de arquivo local;
+- alteração de arquivo local;
+- download de arquivo remoto;
+- criação de pasta vazia;
+- exclusão de arquivo para `.Trash`;
+- exclusão de pasta para `.Trash`;
+- conflito de edição;
+- sincronização de arquivos na raiz;
+- execução simultânea de dois domínios;
+- inicialização automática após novo logon.
 
 ## Licença
 
-Defina no repositório a licença aplicável ao projeto e as condições de uso, modificação e distribuição.
+Defina neste repositório a licença aplicável ao projeto. Para uso restrito ou interno, documente explicitamente as condições de uso, cópia, modificação e distribuição.
