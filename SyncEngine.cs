@@ -5,19 +5,21 @@ namespace MeshDriveSync;
 
 public sealed class SyncEngine : IDisposable
 {
-    readonly AppSettings s;
+    readonly MappingProfile s;
     readonly WebDavClient dav;
     readonly Action<ProgressInfo> report;
-    readonly StateStore state = StateStore.Load();
+    readonly StateStore state;
     readonly SemaphoreSlim gate = new(1, 1);
     readonly FileSystemWatcher watch;
     readonly CancellationTokenSource cts = new();
     System.Threading.Timer? safetyTimer;
     System.Threading.Timer? eventTimer;
 
-    public SyncEngine(AppSettings settings, string password, Action<ProgressInfo> progress)
+    public SyncEngine(MappingProfile settings, string password, Action<ProgressInfo> progress)
     {
         s = settings;
+        s.LocalFolder = s.EffectiveLocalFolder;
+        state = StateStore.Load(s.StateFile);
         report = progress;
         dav = new WebDavClient(s, password);
         Directory.CreateDirectory(s.LocalFolder);
@@ -174,7 +176,7 @@ public sealed class SyncEngine : IDisposable
                 }
                 catch (Exception ex) { errors++; Log(rel + ": " + ex); }
             }
-            state.Save();
+            state.Save(s.StateFile);
             report(new(errors > 0 ? "Concluído com erros" : "Sincronizado", "", up, down, conflicts, errors, errors > 0));
         }
         catch (Exception ex)
@@ -189,6 +191,6 @@ public sealed class SyncEngine : IDisposable
     bool Ignored(string file) => s.Ignore.Any(pattern => Regex.IsMatch(Path.GetFileName(file), "^" + Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$", RegexOptions.IgnoreCase));
     static async Task<string> Hash(string file) { using var sha = SHA256.Create(); await using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); return Convert.ToHexString(await sha.ComputeHashAsync(stream)); }
     void Save(string path, string hash, string? etag) => state.Files[path] = new() { Hash = hash, Etag = etag };
-    static void Log(string text) { Directory.CreateDirectory(AppSettings.Data); File.AppendAllText(AppSettings.Log, DateTime.Now + " " + text + Environment.NewLine); }
+    void Log(string text) { Directory.CreateDirectory(Path.GetDirectoryName(s.LogFile)!); File.AppendAllText(s.LogFile, DateTime.Now + " " + text + Environment.NewLine); }
     public void Dispose() { cts.Cancel(); eventTimer?.Dispose(); safetyTimer?.Dispose(); watch.Dispose(); dav.Dispose(); gate.Dispose(); cts.Dispose(); }
 }
